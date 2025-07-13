@@ -41,13 +41,12 @@ from action_handlers import (
     handle_remote_macos_mouse_drag_n_drop
 )
 
+# Import logging utility
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from logging_utils import configure_logging, get_action_logger
+
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('mcp_remote_macos_use')
-logger.setLevel(logging.DEBUG)
+logger = configure_logging('mcp_remote_macos_use', logging.DEBUG)
 
 # Load environment variables for VNC connection
 MACOS_HOST = os.environ.get('MACOS_HOST', '')
@@ -256,6 +255,10 @@ async def main():
     ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
         """Handle tool execution requests"""
         try:
+            # Get action-specific logger
+            action_logger = get_action_logger(name, 'mcp_remote_macos_use')
+            action_logger.info(f"Executing action: {name} with arguments: {arguments}")
+            
             if not arguments:
                 arguments = {}
 
@@ -284,10 +287,14 @@ async def main():
                 return handle_remote_macos_mouse_drag_n_drop(arguments)
 
             else:
-                raise ValueError(f"Unknown tool: {name}")
+                error_msg = f"Unknown tool: {name}"
+                action_logger.error(error_msg)
+                raise ValueError(error_msg)
 
         except Exception as e:
             logger.error(f"Error in handle_call_tool: {str(e)}", exc_info=True)
+            if 'action_logger' in locals():
+                action_logger.error(f"Action failed with error: {str(e)}", exc_info=True)
             return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):

@@ -6,6 +6,11 @@ import io
 from PIL import Image
 import pyDes
 from typing import Optional, Tuple, List, Dict, Any
+import uuid
+from datetime import datetime
+
+# Import screenshot utilities
+from screenshot_utils import get_next_screenshot_index, initialize_screenshot_counter
 
 # Configure logging
 logging.basicConfig(
@@ -69,16 +74,33 @@ async def capture_vnc_screen(host: str, port: int, password: str, username: Opti
             # Resize the image to the target resolution
             scaled_img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
-            # Convert back to bytes
+            # Create screenshots directory if it doesn't exist
+            screenshots_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots")
+            os.makedirs(screenshots_dir, exist_ok=True)
+            
+            # Get next screenshot index
+            screenshot_index = get_next_screenshot_index()
+            
+            # Generate a unique filename with timestamp and index
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = str(uuid.uuid4())[:8]
+            filename = f"screenshot_{timestamp}_{screenshot_index:04d}_{unique_id}.png"
+            filepath = os.path.join(screenshots_dir, filename)
+            
+            # Save the image to file
+            scaled_img.save(filepath, format='PNG')
+            
+            # Also convert to bytes for backward compatibility
             output_buffer = io.BytesIO()
             scaled_img.save(output_buffer, format='PNG')
             output_buffer.seek(0)
             scaled_screen_data = output_buffer.getvalue()
-
+            
             logger.info(f"Scaled image from {original_dims[0]}x{original_dims[1]} to {target_width}x{target_height}")
-
-            # Return success with scaled screen data and target dimensions
-            return True, scaled_screen_data, None, (target_width, target_height)
+            logger.info(f"Saved screenshot to {filepath}")
+            
+            # Return success with scaled screen data, filepath, and target dimensions
+            return True, scaled_screen_data, filepath, (target_width, target_height)
 
         except Exception as e:
             logger.warning(f"Failed to scale image: {str(e)}. Returning original image.")

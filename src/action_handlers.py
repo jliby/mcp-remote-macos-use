@@ -5,18 +5,21 @@ import os
 import sys
 import subprocess
 import time
+import uuid
+from datetime import datetime
+
+# Import screenshot utilities
+from screenshot_utils import get_next_screenshot_index, initialize_screenshot_counter
 
 import mcp.types as types
 # Import vnc_client from the current directory
 from vnc_client import VNCClient, capture_vnc_screen
 
+# Import logging utility
+from logging_utils import configure_logging, get_action_logger
+
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('action_handlers')
-logger.setLevel(logging.DEBUG)
+logger = configure_logging('action_handlers', logging.DEBUG)
 
 # Load environment variables for VNC connection
 MACOS_HOST = os.environ.get('MACOS_HOST', '')
@@ -24,6 +27,10 @@ MACOS_PORT = int(os.environ.get('MACOS_PORT', '5900'))
 MACOS_USERNAME = os.environ.get('MACOS_USERNAME', '')
 MACOS_PASSWORD = os.environ.get('MACOS_PASSWORD', '')
 VNC_ENCRYPTION = os.environ.get('VNC_ENCRYPTION', 'prefer_on')
+
+# Initialize screenshot counter based on existing files
+max_index = initialize_screenshot_counter()
+logger.info(f"Screenshot counter initialized, starting from index: {max_index + 1}")
 
 # Log environment variable status (without exposing actual values)
 logger.info(f"MACOS_HOST from environment: {'Set' if MACOS_HOST else 'Not set'}")
@@ -42,6 +49,15 @@ if not MACOS_PASSWORD:
 
 async def handle_remote_macos_get_screen(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Connect to a remote MacOs machine and get a screenshot of the remote desktop."""
+    # Get action-specific logger
+    action_logger = get_action_logger('remote_macos_get_screen', 'action_handlers')
+    action_logger.info(f"Starting screen capture with arguments: {arguments}")
+    
+    # Ensure screenshots directory exists
+    screenshots_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots")
+    os.makedirs(screenshots_dir, exist_ok=True)
+    action_logger.info(f"Ensuring screenshots directory exists at: {screenshots_dir}")
+    
     # Use environment variables
     host = MACOS_HOST
     port = MACOS_PORT
@@ -50,18 +66,41 @@ async def handle_remote_macos_get_screen(arguments: dict[str, Any]) -> list[type
     encryption = VNC_ENCRYPTION
 
     # Capture screen using helper method
-    success, screen_data, error_message, dimensions = await capture_vnc_screen(
+    success, screen_data, filepath_or_error, dimensions = await capture_vnc_screen(
         host=host, port=port, password=password, username=username, encryption=encryption
     )
 
     if not success:
-        return [types.TextContent(type="text", text=error_message)]
+        return [types.TextContent(type="text", text=filepath_or_error)]
 
     # Encode image in base64
     base64_data = base64.b64encode(screen_data).decode('utf-8')
 
-    # Return image content with dimensions
+    # Return image content with dimensions and filepath
     width, height = dimensions
+    
+    # If filepath_or_error is None (which can happen if scaling fails), save the image explicitly
+    if filepath_or_error is None:
+        try:
+            # Get next screenshot index
+            screenshot_index = get_next_screenshot_index()
+            
+            # Generate a unique filename with timestamp and index
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = str(uuid.uuid4())[:8]
+            filename = f"screenshot_{timestamp}_{screenshot_index:04d}_{unique_id}.png"
+            filepath = os.path.join(screenshots_dir, filename)
+            
+            # Save the image to file
+            with open(filepath, 'wb') as f:
+                f.write(screen_data)
+            
+            action_logger.info(f"Explicitly saved screenshot to {filepath}")
+            filepath_or_error = filepath
+        except Exception as e:
+            action_logger.error(f"Failed to save screenshot: {str(e)}")
+            filepath_or_error = "Failed to save screenshot"
+    
     return [
         types.ImageContent(
             type="image",
@@ -71,7 +110,7 @@ async def handle_remote_macos_get_screen(arguments: dict[str, Any]) -> list[type
         ),
         types.TextContent(
             type="text",
-            text=f"Image dimensions: {width}x{height}"
+            text=f"Image dimensions: {width}x{height}\nSaved to: {filepath_or_error}"
         )
     ]
 
